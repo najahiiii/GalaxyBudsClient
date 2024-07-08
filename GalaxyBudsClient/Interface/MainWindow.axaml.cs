@@ -247,7 +247,13 @@ public partial class MainWindow : StyledAppWindow
         {
             Platform.PlatformImpl.MediaKeyRemote.Play();
         }
-            
+
+        // Send pause signal on removal
+        if (_lastWearState != LegacyWearStates.None && e.WearState == LegacyWearStates.None)
+        {
+            Platform.PlatformImpl.MediaKeyRemote.Pause();
+        }
+
         // Update dynamic tray icon
         if (e is IBasicStatusUpdate status)
         {
