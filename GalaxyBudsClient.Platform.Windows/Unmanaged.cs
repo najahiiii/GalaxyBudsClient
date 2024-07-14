@@ -286,6 +286,10 @@ namespace GalaxyBudsClient.Platform.Windows
                 public Int32 Y;
             };
 
+            [DllImport("user32.dll", SetLastError = true)]
+            [return: MarshalAs(UnmanagedType.Bool)]
+            public static extern bool DestroyWindow(IntPtr hWnd);
+
             [DllImport("user32.dll", EntryPoint = "DefWindowProcW")]
             internal static extern IntPtr DefWindowProc(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
 

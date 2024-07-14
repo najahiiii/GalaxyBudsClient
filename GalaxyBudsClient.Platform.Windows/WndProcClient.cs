@@ -2,18 +2,21 @@
 using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Threading;
+using System.Threading.Tasks;
 using Serilog;
 
 namespace GalaxyBudsClient.Platform.Windows
 {
-
-    public partial class WndProcClient
+    public partial class WndProcClient : IDisposable
     {
         public event EventHandler<WindowMessage>? MessageReceived;
 
         private readonly IntPtr _hwnd;
         /* prevent garbage collection */
         private readonly Unmanaged.WNDCLASSEX _wndClassEx;
+        private readonly CancellationTokenSource _cancellationTokenSource;
+        private Task? _messageProcessingTask;
+
         public IntPtr WindowHandle => _hwnd;
 
         public WndProcClient()
@@ -21,7 +24,7 @@ namespace GalaxyBudsClient.Platform.Windows
             _wndClassEx = new Unmanaged.WNDCLASSEX
             {
                 cbSize = Marshal.SizeOf<Unmanaged.WNDCLASSEX>(),
-                lpfnWndProc = delegate(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam) { 
+                lpfnWndProc = delegate (IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam) {
                     var message = new WindowMessage()
                     {
                         hWnd = hWnd,
@@ -53,11 +56,12 @@ namespace GalaxyBudsClient.Platform.Windows
                 Log.Error("Interop.Win32.WndProcClient: nWnd is null");
                 throw new Win32Exception();
             }
+
+            _cancellationTokenSource = new CancellationTokenSource();
         }
-        
+
         public void ProcessMessage()
         {
-
             if (Unmanaged.GetMessage(out var msg, IntPtr.Zero, 0, 0) > -1)
             {
                 Unmanaged.TranslateMessage(ref msg);
@@ -72,17 +76,45 @@ namespace GalaxyBudsClient.Platform.Windows
 
         public void RunLoop(CancellationToken cancellationToken)
         {
-            var result = 0;
-            while (!cancellationToken.IsCancellationRequested
-                   && (result = Unmanaged.GetMessage(out var msg, IntPtr.Zero, 0, 0)) > 0)
+            _messageProcessingTask = Task.Run(() =>
             {
-                Unmanaged.TranslateMessage(ref msg);
-                Unmanaged.DispatchMessage(ref msg);
+                var result = 0;
+                while (!cancellationToken.IsCancellationRequested
+                       && (result = Unmanaged.GetMessage(out var msg, IntPtr.Zero, 0, 0)) > 0)
+                {
+                    Unmanaged.TranslateMessage(ref msg);
+                    Unmanaged.DispatchMessage(ref msg);
+                    Thread.Sleep(10);
+                }
+                if (result < 0)
+                {
+                    Log.Error("WndProcClient: Unmanaged error in {This}. Error Code: {Code}", nameof(RunLoop),
+                        Marshal.GetLastWin32Error());
+                }
+            }, cancellationToken);
+        }
+
+        public void Start()
+        {
+            if (_messageProcessingTask == null || _messageProcessingTask.IsCompleted)
+            {
+                RunLoop(_cancellationTokenSource.Token);
             }
-            if (result < 0)
+        }
+
+        public void Stop()
+        {
+            _cancellationTokenSource.Cancel();
+            _messageProcessingTask?.Wait();
+        }
+
+        public void Dispose()
+        {
+            Stop();
+            _cancellationTokenSource.Dispose();
+            if (_hwnd != IntPtr.Zero)
             {
-                Log.Error("WndProcClient: Unmanaged error in {This}. Error Code: {Code}", nameof(RunLoop),
-                    Marshal.GetLastWin32Error());
+                Unmanaged.DestroyWindow(_hwnd);
             }
         }
     }
